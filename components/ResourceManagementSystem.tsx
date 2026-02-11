@@ -171,8 +171,6 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
   const handleReturnItemPhoto = async (itemId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const file = e.target.files?.[0];
-    if (!file) return;
     const { base64 } = await compressImage(file);
     // Use a placeholder prefix for display if needed, but here we probably want to store the base64 for preview?
     // Browser can display base64 images directly.
