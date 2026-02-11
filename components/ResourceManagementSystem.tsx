@@ -112,7 +112,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
   }>({ returner: userInfo.name, notes: '', itemDetails: {} });
 
   const borrowedItemIds = useMemo(() => {
-    return new Set(sessions.flatMap(s => s.items.filter(id => !s.returnedItems[id])));
+    return new Set(sessions.flatMap(s => (s.items || []).filter(id => !s.returnedItems[id])));
   }, [sessions]);
 
   const getDateTime = () => {
