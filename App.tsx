@@ -560,7 +560,21 @@ const AppContent: React.FC = () => {
         const data = await fetchData('getAll');
         if (data && data.data) {
           // Transform / Validate data if necessary
-          if (data.data.venueBookings) setBookings(data.data.venueBookings);
+          if (data.data.venueBookings) {
+            const normalizedBookings = data.data.venueBookings.map((b: any) => {
+              // Handle potential ISO strings from GAS (if Sheets converted them to Dates)
+              const normalizeDate = (d: any) => {
+                if (typeof d === 'string' && d.includes('T')) return d.split('T')[0];
+                return d;
+              };
+              return {
+                ...b,
+                startDate: normalizeDate(b.startDate),
+                endDate: normalizeDate(b.endDate)
+              };
+            });
+            setBookings(normalizedBookings);
+          }
           // We also need to pass resource data to ResourceManagementSystem, 
           // but currently ResourceManagementSystem handles its own state. 
           // We should probably hoist state or pass the initial data down.
