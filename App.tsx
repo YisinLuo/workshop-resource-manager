@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Layout } from './Layout';
 import { Login } from './components/Login';
 import { ResourceManagementSystem } from './components/ResourceManagementSystem';
-import { fetchData } from './utils/api'; // Import API helper
+import { api } from './utils/api';
 
 // --- Constants & Types ---
 
@@ -30,6 +30,7 @@ interface Booking {
   carModel: string;
   purpose: string;
   password: string; // 5-digit
+  excludedDates?: string[]; // For partial cancellations
 }
 
 // --- Helper Functions ---
@@ -89,6 +90,16 @@ const BookingDetailView: React.FC<{ booking: Booking; onClose: () => void }> = (
               <span className="text-slate-500">借用目的</span>
               <p className="bg-slate-50 p-3 rounded-xl border text-sm text-slate-700 italic">{booking.purpose}</p>
             </div>
+            {booking.excludedDates && booking.excludedDates.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <span className="text-slate-500 text-xs font-bold text-rose-500">已取消日期 (Excluded Dates)</span>
+                <div className="flex flex-wrap gap-1">
+                  {booking.excludedDates.map(d => (
+                    <span key={d} className="text-[10px] bg-rose-50 text-rose-600 px-2 py-1 rounded border border-rose-100">{d}</span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div className="p-4 bg-slate-50 border-t flex justify-center">
@@ -105,17 +116,23 @@ const BookingDetailView: React.FC<{ booking: Booking; onClose: () => void }> = (
 const CancelConfirmationModal: React.FC<{
   booking: Booking;
   onClose: () => void;
-  onConfirmCancel: (id: string, password: string, selectedDates: string[]) => boolean;
+  onConfirmCancel: (id: string, password: string, selectedDates: string[]) => Promise<boolean>;
 }> = ({ booking, onClose, onConfirmCancel }) => {
   const [showPasswordInput, setShowPasswordInput] = useState(false);
   const [password, setPassword] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const allDates = useMemo(() => getDatesInRange(booking.startDate, booking.endDate), [booking]);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
 
+  // Filter out dates that are already excluded
+  const validDates = useMemo(() => {
+    return allDates.filter(d => !booking.excludedDates?.includes(d));
+  }, [allDates, booking.excludedDates]);
+
   const cancellableDates = useMemo(() => {
-    return allDates.filter(date => !isDayStarted(date, booking.startTime));
-  }, [allDates, booking.startTime]);
+    return validDates.filter(date => !isDayStarted(date, booking.startTime));
+  }, [validDates, booking.startTime]);
 
   const handleToggleDate = (date: string) => {
     setSelectedDates(prev => prev.includes(date) ? prev.filter(d => d !== date) : [...prev, date]);
@@ -137,8 +154,12 @@ const CancelConfirmationModal: React.FC<{
     setShowPasswordInput(true);
   };
 
-  const handleFinalCancel = () => {
-    if (onConfirmCancel(booking.id, password, selectedDates)) {
+  const handleFinalCancel = async () => {
+    setIsProcessing(true);
+    const success = await onConfirmCancel(booking.id, password, selectedDates);
+    setIsProcessing(false);
+
+    if (success) {
       alert('所選預約已成功取消/更新。');
       onClose();
     } else {
@@ -172,7 +193,7 @@ const CancelConfirmationModal: React.FC<{
                     )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {allDates.map(date => {
+                    {validDates.map(date => {
                       const started = isDayStarted(date, booking.startTime);
                       const isSelected = selectedDates.includes(date);
                       return (
@@ -180,7 +201,7 @@ const CancelConfirmationModal: React.FC<{
                           key={date}
                           onClick={() => !started && handleToggleDate(date)}
                           className={`p-3 rounded-xl border-2 flex items-center justify-between transition-all cursor-pointer ${started ? 'bg-slate-100 border-slate-200 opacity-50 cursor-not-allowed' :
-                            isSelected ? 'bg-rose-50 border-rose-500' : 'bg-white border-slate-100 hover:border-slate-300'
+                              isSelected ? 'bg-rose-50 border-rose-500' : 'bg-white border-slate-100 hover:border-slate-300'
                             }`}
                         >
                           <div className="flex flex-col">
@@ -223,7 +244,8 @@ const CancelConfirmationModal: React.FC<{
         <div className="p-8 bg-slate-50 border-t flex gap-4">
           <button
             onClick={() => showPasswordInput ? setShowPasswordInput(false) : onClose()}
-            className="flex-1 py-4 border border-slate-200 rounded-2xl font-black text-slate-500 hover:bg-white transition-all active:scale-95"
+            disabled={isProcessing}
+            className="flex-1 py-4 border border-slate-200 rounded-2xl font-black text-slate-500 hover:bg-white transition-all active:scale-95 disabled:opacity-50"
           >
             返回
           </button>
@@ -238,10 +260,10 @@ const CancelConfirmationModal: React.FC<{
           ) : (
             <button
               onClick={handleFinalCancel}
-              disabled={password.length !== 5}
-              className={`flex-1 py-4 rounded-2xl font-black text-white shadow-lg transition-all active:scale-95 ${password.length === 5 ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-200' : 'bg-slate-300 cursor-not-allowed opacity-50'}`}
+              disabled={password.length !== 5 || isProcessing}
+              className={`flex-1 py-4 rounded-2xl font-black text-white shadow-lg transition-all active:scale-95 ${password.length === 5 && !isProcessing ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-200' : 'bg-slate-300 cursor-not-allowed opacity-50'}`}
             >
-              確認取消並刪除
+              {isProcessing ? '處理中...' : '確認取消並刪除'}
             </button>
           )}
         </div>
@@ -282,7 +304,10 @@ const VenueCalendar: React.FC<{
     const datesWithBookings = new Set<string>();
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
-      const hasBooking = bookings.some(b => isDateInRange(dateStr, b.startDate, b.endDate));
+      const hasBooking = bookings.some(b =>
+        isDateInRange(dateStr, b.startDate, b.endDate) &&
+        !b.excludedDates?.includes(dateStr)
+      );
       if (hasBooking) datesWithBookings.add(dateStr);
     }
     return datesWithBookings.size;
@@ -321,7 +346,13 @@ const VenueCalendar: React.FC<{
         {calendarDays.map((day, idx) => {
           if (day === null) return <div key={`empty-${idx}`} className="bg-slate-50/20 border-r border-b border-slate-100"></div>;
           const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-          const dayBookings = bookings.filter(b => isDateInRange(dateStr, b.startDate, b.endDate));
+
+          // Filter bookings for this day, excluding cancelled dates
+          const dayBookings = bookings.filter(b =>
+            isDateInRange(dateStr, b.startDate, b.endDate) &&
+            !b.excludedDates?.includes(dateStr)
+          );
+
           const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
           const dayOfWeek = (idx % 7);
           const isWeekend = dayOfWeek >= 5;
@@ -355,9 +386,10 @@ const VenueBookingModal: React.FC<{
   userInfo: { name: string; department: string };
   onClose: (targetMonth?: Date) => void;
   bookings: Booking[];
-  onAddBooking: (b: Booking) => void;
+  onAddBooking: (b: Omit<Booking, 'id' | 'excludedDates'>) => Promise<void>;
 }> = ({ venue, userInfo, onClose, bookings, onAddBooking }) => {
   const [step, setStep] = useState<'form' | 'preview' | 'success'>('form');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     startDate: new Date().toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
@@ -369,7 +401,12 @@ const VenueBookingModal: React.FC<{
   });
 
   const isSlotBooked = (date: string, time: string) => {
-    return bookings.some(b => b.venue === venue && isDateInRange(date, b.startDate, b.endDate) && time >= b.startTime && time < b.endTime);
+    return bookings.some(b =>
+      b.venue === venue &&
+      isDateInRange(date, b.startDate, b.endDate) &&
+      !b.excludedDates?.includes(date) &&
+      time >= b.startTime && time < b.endTime
+    );
   };
 
   const isValid = formData.carModel && formData.purpose && formData.password.length === 5 && formData.startDate <= formData.endDate;
@@ -378,28 +415,16 @@ const VenueBookingModal: React.FC<{
     if (isValid) setStep('preview');
   };
 
-  const handleSubmit = () => {
-    const newBooking: Booking = {
-      id: Math.random().toString(36).substr(2, 9),
+  const handleSubmit = async () => {
+    setIsSubmitting(true);
+    await onAddBooking({
       venue,
       applicant: userInfo.name,
       dept: userInfo.department,
       ...formData
-    };
-
-    // Call API
-    fetchData('bookVenue', newBooking)
-      .then(res => {
-        if (res.status === 'success') {
-          onAddBooking(newBooking);
-          setStep('success');
-        } else {
-          alert('預約失敗，請稍後再試: ' + res.message);
-        }
-      })
-      .catch(err => {
-        alert('連線錯誤: ' + err);
-      });
+    });
+    setIsSubmitting(false);
+    setStep('success');
   };
 
   return (
@@ -524,7 +549,13 @@ const VenueBookingModal: React.FC<{
             {step === 'preview' ? (
               <>
                 <button onClick={() => setStep('form')} className="flex-1 py-4 border border-slate-200 rounded-2xl font-bold text-slate-600 hover:bg-white transition-colors">上一步修改</button>
-                <button onClick={handleSubmit} className="flex-1 py-4 bg-emerald-600 rounded-2xl font-bold text-white shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95">確認並提交預約</button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting}
+                  className={`flex-1 py-4 bg-emerald-600 rounded-2xl font-bold text-white shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95 ${isSubmitting ? 'opacity-70 cursor-wait' : ''}`}
+                >
+                  {isSubmitting ? '提交中...' : '確認並提交預約'}
+                </button>
               </>
             ) : (
               <>
@@ -552,173 +583,75 @@ const AppContent: React.FC = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [todayDate, setTodayDate] = useState(new Date());
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    // Initial Fetch
-    const loadData = async () => {
-      try {
-        const data = await fetchData('getAll');
-        if (data && data.data) {
-          // Transform / Validate data if necessary
-          if (data.data.venueBookings) {
-            const normalizedBookings = data.data.venueBookings.map((b: any) => {
-              // Handle potential ISO strings from GAS (if Sheets converted them to Dates)
-              const normalizeDate = (d: any) => {
-                if (typeof d === 'string' && d.includes('T')) return d.split('T')[0];
-                return d;
-              };
-              return {
-                ...b,
-                startDate: normalizeDate(b.startDate),
-                endDate: normalizeDate(b.endDate)
-              };
-            });
-            setBookings(normalizedBookings);
-          }
-          // We also need to pass resource data to ResourceManagementSystem, 
-          // but currently ResourceManagementSystem handles its own state. 
-          // We should probably hoist state or pass the initial data down.
-          // For now, let's just save simple venue bookings here.
-        }
-      } catch (error) {
-        console.error("Failed to load data", error);
-      }
-    };
-    loadData();
+    // Check localStorage for login
+    const savedUser = localStorage.getItem('carmax_user_v1');
+    if (savedUser) {
+      setUserInfo(JSON.parse(savedUser));
+      setIsLoggedIn(true);
+    }
 
     const timer = setInterval(() => setTodayDate(new Date()), 60000);
+    loadData(); // Initial load
     return () => clearInterval(timer);
   }, []);
 
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const data = await api.getAllData();
+      if (data && data.venues) {
+        setBookings(data.venues);
+        // Note: sessions and history are also available in `data`, 
+        // but ResourceManagementSystem will load its own data or we can pass it down.
+        // For simplicity in refactoring, we let ResourceManagementSystem call fetch on mount as well.
+      }
+    } catch (e) {
+      console.error("Failed to load data", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleLoginSuccess = (name: string, dept: string) => {
-    setUserInfo({ name, department: dept });
+    const user = { name, department: dept };
+    setUserInfo(user);
     setIsLoggedIn(true);
+    localStorage.setItem('carmax_user_v1', JSON.stringify(user));
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
     setUserInfo({ name: '', department: '' });
     setSelectedVenue(null);
+    localStorage.removeItem('carmax_user_v1');
   };
 
-  const addBooking = (b: Booking) => {
-    setBookings(prev => [...prev, b]);
+  const addBooking = async (b: Omit<Booking, 'id' | 'excludedDates'>) => {
+    // Generate ID on client or server? Server is safer but client is faster for optimisic UI. 
+    // GAS script expects ID.
+    const newId = Math.random().toString(36).substr(2, 9);
+    const booking = { ...b, id: newId };
+
+    try {
+      await api.bookVenue(booking);
+      await loadData();
+    } catch (e) {
+      alert('預約失敗: ' + e);
+    }
   };
 
-  /**
-   * Complex partial cancellation logic
-   */
-  const confirmAndCancelBooking = (id: string, pass: string, datesToRemove: string[]): boolean => {
-    const b = bookings.find(x => x.id === id);
-    if (!b) return false;
-    if (b.password !== pass) return false;
-
-    const allDates = getDatesInRange(b.startDate, b.endDate);
-    const remainingDates = allDates.filter(d => !datesToRemove.includes(d));
-
-    setBookings(prev => {
-      const filtered = prev.filter(x => x.id !== id);
-      if (remainingDates.length === 0) return filtered;
-
-      // Group remaining dates into continuous ranges
-      const newBookings: Booking[] = [];
-      let currentRange: string[] = [];
-
-      remainingDates.forEach((date) => {
-        if (currentRange.length === 0) {
-          currentRange.push(date);
-        } else {
-          const prevDate = new Date(currentRange[currentRange.length - 1]);
-          const currDate = new Date(date);
-          const diff = (currDate.getTime() - prevDate.getTime()) / (1000 * 3600 * 24);
-
-          if (Math.round(diff) === 1) {
-            currentRange.push(date);
-          } else {
-            newBookings.push({
-              ...b,
-              id: Math.random().toString(36).substr(2, 9),
-              startDate: currentRange[0],
-              endDate: currentRange[currentRange.length - 1]
-            });
-            currentRange = [date];
-          }
-        }
-      });
-
-      if (currentRange.length > 0) {
-        newBookings.push({
-          ...b,
-          id: Math.random().toString(36).substr(2, 9),
-          startDate: currentRange[0],
-          endDate: currentRange[currentRange.length - 1]
-        });
-      }
-
-      return [...filtered, ...newBookings];
-    });
-
-    // Call API to cancel
-    fetchData('cancelVenue', { id, password: pass, datesToRemove })
-      .then(res => {
-        if (res.status === 'success') {
-          // Optimistic update locally (existing logic)
-          setBookings(prev => {
-            const filtered = prev.filter(x => x.id !== id);
-            if (remainingDates.length === 0) return filtered;
-
-            // Group remaining dates into continuous ranges
-            const newBookings: Booking[] = [];
-            let currentRange: string[] = [];
-
-            remainingDates.forEach((date) => {
-              if (currentRange.length === 0) {
-                currentRange.push(date);
-              } else {
-                const prevDate = new Date(currentRange[currentRange.length - 1]);
-                const currDate = new Date(date);
-                const diff = (currDate.getTime() - prevDate.getTime()) / (1000 * 3600 * 24);
-
-                if (Math.round(diff) === 1) {
-                  currentRange.push(date);
-                } else {
-                  newBookings.push({
-                    ...b,
-                    id: Math.random().toString(36).substr(2, 9),
-                    startDate: currentRange[0],
-                    endDate: currentRange[currentRange.length - 1]
-                  });
-                  currentRange = [date];
-                }
-              }
-            });
-
-            if (currentRange.length > 0) {
-              newBookings.push({
-                ...b,
-                id: Math.random().toString(36).substr(2, 9),
-                startDate: currentRange[0],
-                endDate: currentRange[currentRange.length - 1]
-              });
-            }
-
-            return [...filtered, ...newBookings];
-          });
-          return true;
-        } else {
-          alert('取消失敗: ' + res.message);
-          return false;
-        }
-      })
-      .catch(err => {
-        alert('連線錯誤');
-        return false;
-      });
-
-    return true; // Return true to close modal immediately or handle async properly? 
-    // The original modal expects sync return boolean. We might need to refactor modal to handle async.
-    // For now, let's assume success to close UI, but alert if fail.
-    // Ideally refactor CancelConfirmationModal to handle async onConfirm.
+  const confirmAndCancelBooking = async (id: string, pass: string, datesToRemove: string[]): Promise<boolean> => {
+    try {
+      await api.cancelBooking(id, pass, datesToRemove);
+      await loadData();
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
   };
 
   if (!isLoggedIn) {
@@ -731,6 +664,14 @@ const AppContent: React.FC = () => {
       setActiveTab={setActiveTab}
       onLogout={handleLogout}
     >
+      {/* Loading Overlay */}
+      {isLoading && (
+        <div className="fixed top-4 right-4 bg-white/80 backdrop-blur px-4 py-2 rounded-full shadow-lg z-[200] flex items-center gap-2 text-xs font-bold text-slate-500 animate-pulse">
+          <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-blue-500 animate-spin"></div>
+          Syncing...
+        </div>
+      )}
+
       {/* Modals */}
       {selectedVenue && (
         <VenueBookingModal
@@ -844,8 +785,13 @@ const AppContent: React.FC = () => {
                 <div className="space-y-4">
                   {bookings.filter(b => b.applicant === userInfo.name).map(b => {
                     const allDates = getDatesInRange(b.startDate, b.endDate);
-                    const cancellableCount = allDates.filter(d => !isDayStarted(d, b.startTime)).length;
+                    // Exclude dates that are already cancelled
+                    const validDates = allDates.filter(d => !b.excludedDates?.includes(d));
+
+                    const cancellableCount = validDates.filter(d => !isDayStarted(d, b.startTime)).length;
                     const canCancelAtLeastOne = cancellableCount > 0;
+
+                    if (validDates.length === 0) return null; // Don't show fully cancelled bookings if they persist in memory
 
                     return (
                       <div key={b.id} className={`bg-white p-6 rounded-3xl border border-slate-200 shadow-sm transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${!canCancelAtLeastOne ? 'opacity-60 grayscale-[0.5]' : 'hover:shadow-md'}`}>

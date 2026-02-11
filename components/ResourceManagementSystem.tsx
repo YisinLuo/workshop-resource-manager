@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { compressImage } from '../utils/image';
-import { fetchData } from '../utils/api';
+import { api } from '../utils/api';
 
 // --- Types & Constants ---
 interface ResourceItem {
@@ -84,31 +84,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
   const [subTab, setSubTab] = useState<'status' | 'borrow' | 'return' | 'history'>('status');
   const [sessions, setSessions] = useState<BorrowSession[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-
-  // Fetch Data on Mount
-  useEffect(() => {
-    const loadResourceData = async () => {
-      try {
-        const data = await fetchData('getAll');
-        if (data && data.data) {
-          if (data.data.resourceSessions) setSessions(data.data.resourceSessions);
-          if (data.data.resourceHistory) {
-            const parsedHistory = data.data.resourceHistory.map((h: any) => {
-              let items = {};
-              try {
-                items = h.status_json ? JSON.parse(h.status_json) : {};
-              } catch (e) {
-                console.error("Failed to parse history status_json", h);
-              }
-              return { ...h, items, transferLogs: h.transferLogs || [] };
-            });
-            setHistory(parsedHistory);
-          }
-        }
-      } catch (e) { console.error(e); }
-    };
-    loadResourceData();
-  }, []);
+  const [isLoading, setIsLoading] = useState(false);
 
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [workflow, setWorkflow] = useState<'none' | 'borrow_preview' | 'borrow_success' | 'return_form' | 'return_preview' | 'return_success' | 'transfer_form'>('none');
@@ -122,8 +98,29 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
     itemDetails: Record<string, { isIntact: boolean; photos: string[] }>;
   }>({ returner: userInfo.name, notes: '', itemDetails: {} });
 
+  const [uploadingItems, setUploadingItems] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    loadData();
+  }, []); // Initial load
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const data = await api.getAllData();
+      if (data) {
+        if (data.sessions) setSessions(data.sessions);
+        if (data.history) setHistory(data.history);
+      }
+    } catch (e) {
+      console.error("Failed to load resource data", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const borrowedItemIds = useMemo(() => {
-    return new Set(sessions.flatMap(s => (s.items || []).filter(id => !s.returnedItems[id])));
+    return new Set(sessions.flatMap(s => s.items.filter(id => !s.returnedItems[id])));
   }, [sessions]);
 
   const getDateTime = () => {
@@ -131,143 +128,124 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
     return `${d.getFullYear()}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   };
 
-  const handleConfirmBorrow = () => {
-    const newSession: BorrowSession = {
-      id: Math.random().toString(36).substr(2, 9),
+  const handleConfirmBorrow = async () => {
+    const newSession = {
       items: [...selectedItemIds],
       borrower: userInfo.name,
       dept: userInfo.dept,
       borrowTime: getDateTime(),
-      transferLogs: [],
-      returnedItems: {}
     };
 
-    // Call API
-    fetchData('borrowResource', { ...newSession, borrowTime: newSession.borrowTime }) // API payload
-      .then(res => {
-        if (res.status === 'success') {
-          setSessions([newSession, ...sessions]);
-          setSelectedItemIds([]);
-          setWorkflow('borrow_success');
-        } else {
-          alert('借用失敗: ' + res.message);
-        }
-      });
+    setIsLoading(true);
+    try {
+      await api.borrowItems(newSession);
+      await loadData(); // Reload to get the new session with ID from server
+      setSelectedItemIds([]);
+      setWorkflow('borrow_success');
+    } catch (e) {
+      alert('借用失敗: ' + e);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleTransfer = () => {
-    const lastHolder = sessions.find(s => s.id === activeSessionId)?.borrower; // simplified fallback
+  const handleTransfer = async () => {
+    if (!activeSessionId || !transferTarget) return;
 
-    fetchData('transferResource', { sessionId: activeSessionId, newOwner: transferTarget, timestamp: getDateTime() })
-      .then(res => {
-        if (res.status === 'success') {
-          setSessions(sessions.map(s => {
-            if (s.id === activeSessionId) {
-              const lastHolder = s.transferLogs.length > 0 ? s.transferLogs[s.transferLogs.length - 1].to : s.borrower;
-              return {
-                ...s,
-                transferLogs: [...s.transferLogs, { from: lastHolder, to: transferTarget, time: getDateTime() }]
-              };
-            }
-            return s;
-          }));
-          setWorkflow('none');
-          setTransferTarget('');
-        } else {
-          alert('移轉失敗: ' + res.message);
-        }
-      });
+    // Find previous holder
+    const session = sessions.find(s => s.id === activeSessionId);
+    let from = session?.borrower || 'Unknown';
+    if (session && session.transferLogs && session.transferLogs.length > 0) {
+      from = session.transferLogs[session.transferLogs.length - 1].to;
+    }
+
+    setIsLoading(true);
+    try {
+      await api.transferItems(activeSessionId, from, transferTarget, getDateTime());
+      await loadData();
+      setWorkflow('none');
+      setTransferTarget('');
+    } catch (e) {
+      alert('移轉失敗: ' + e);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleReturnItemPhoto = async (itemId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const { base64 } = await compressImage(file);
-    // Use a placeholder prefix for display if needed, but here we probably want to store the base64 for preview?
-    // Browser can display base64 images directly.
-    const url = `data:image/jpeg;base64,${base64}`;
-    setReturnForm(prev => {
-      const details = prev.itemDetails[itemId] || { isIntact: true, photos: [] };
-      return {
-        ...prev,
-        itemDetails: { ...prev.itemDetails, [itemId]: { ...details, photos: [...details.photos, url].slice(0, 4) } }
-      };
-    });
+
+    setUploadingItems(prev => ({ ...prev, [itemId]: true }));
+
+    try {
+      // Compress first
+      const compressed = await compressImage(file);
+      // Upload
+      // We manually call post here because api.uploadImage expects File not base64, 
+      // but we have base64 from compressImage.
+      // Actually we can refactor api to accept base64 or just call post directly.
+      // Calling post directly is easier here.
+      const result = await api.post('UPLOAD_IMAGE', {
+        fileName: compressed.name,
+        mimeType: 'image/jpeg',
+        base64: compressed.base64
+      });
+
+      const url = result.url;
+
+      setReturnForm(prev => {
+        const details = prev.itemDetails[itemId] || { isIntact: true, photos: [] };
+        return {
+          ...prev,
+          itemDetails: { ...prev.itemDetails, [itemId]: { ...details, photos: [...details.photos, url].slice(0, 4) } }
+        };
+      });
+    } catch (error) {
+      alert('圖片上傳失敗');
+      console.error(error);
+    } finally {
+      setUploadingItems(prev => ({ ...prev, [itemId]: false }));
+    }
   };
 
-  const handleExecuteReturn = () => {
+  const handleExecuteReturn = async () => {
     const session = sessions.find(s => s.id === activeSessionId);
     if (!session) return;
 
-    const now = getDateTime();
-    const returningItemsMap = { ...(returnForm.itemDetails as object) } as Record<string, { isIntact: boolean; photos: string[] }>;
-
-    // 單品歸還即時寫入歷史
-    const newHistoryEntry: HistoryEntry = {
-      id: Math.random().toString(36).substr(2, 9),
-      sessionId: session.id,
-      borrower: session.borrower,
-      borrowTime: session.borrowTime,
-      returner: returnForm.returner,
-      returnTime: now,
-      notes: returnForm.notes,
-      transferLogs: [...session.transferLogs],
-      items: returningItemsMap
-    };
-
-    // Prepare images for upload
-    // We stored base64 in `photos` array in handleReturnItemPhoto modification? 
-    // Wait, handleReturnItemPhoto pushes `url` which is `data:image/jpeg;base64,...`
-    // We need to extract base64 for the API if we want to send clean base64, or just send the whole thing and let backend parse.
-    // Our backend expects { name: '...', base64: '...' } in `images` array.
-
-    const imagesToUpload: { name: string; base64: string }[] = [];
-    Object.entries(returningItemsMap).forEach(([itemId, detail]) => {
-      detail.photos.forEach((photoUrl, idx) => {
-        // photoUrl is "data:image/jpeg;base64,....."
-        const base64Clean = photoUrl.split(',')[1];
-        imagesToUpload.push({
-          name: `${itemId}_${idx}.jpg`,
-          base64: base64Clean
-        });
+    setIsLoading(true);
+    try {
+      await api.returnItems({
+        sessionId: session.id,
+        borrower: session.borrower,
+        borrowTime: session.borrowTime,
+        returner: returnForm.returner,
+        returnTime: getDateTime(),
+        notes: returnForm.notes,
+        items: returnForm.itemDetails,
+        transferLogs: session.transferLogs // Pass fetch logs so history has record of transfers
       });
-    });
-
-    fetchData('returnResource', {
-      sessionId: session.id,
-      returnTime: now,
-      returner: returnForm.returner,
-      itemDetails: returningItemsMap,
-      notes: returnForm.notes,
-      images: imagesToUpload
-    }).then(res => {
-      if (res.status === 'success') {
-        // Update Local State
-        setHistory(prev => [newHistoryEntry, ...prev].slice(0, 100));
-
-        const updatedReturnedItemsMap = { ...session.returnedItems };
-        Object.entries(returningItemsMap).forEach(([id, detail]) => {
-          updatedReturnedItemsMap[id] = { ...detail, returner: returnForm.returner, time: now };
-        });
-
-        const updatedSession = { ...session, returnedItems: updatedReturnedItemsMap };
-        const isFullyReturned = session.items.every(id => !!updatedSession.returnedItems[id]);
-
-        if (isFullyReturned) {
-          setSessions(sessions.filter(s => s.id !== activeSessionId));
-        } else {
-          setSessions(sessions.map(s => s.id === activeSessionId ? updatedSession : s));
-        }
-
-        setWorkflow('return_success');
-      } else {
-        alert('歸還失敗: ' + res.message);
-      }
-    });
+      await loadData();
+      setWorkflow('return_success');
+    } catch (e) {
+      alert('歸還失敗: ' + e);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
+  // If api URL is not set, we might want to warn user? 
+  // But App.tsx handles missing ENV mostly.
+
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-6 animate-in fade-in duration-500 relative">
+      {isLoading && (
+        <div className="absolute top-0 right-0 z-50 bg-white/80 backdrop-blur px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-xs font-bold text-slate-500 animate-pulse">
+          <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-blue-500 animate-spin"></div>
+          Syncing...
+        </div>
+      )}
+
       {zoomImg && (
         <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4" onClick={() => setZoomImg(null)}>
           <img src={zoomImg} className="max-w-full max-h-full rounded-lg" alt="Zoom" />
@@ -311,7 +289,8 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                 {RESOURCES.filter(r => r.category === cat).map(item => {
                   const isBorrowed = borrowedItemIds.has(item.id);
                   const session = sessions.find(s => s.items.includes(item.id) && !s.returnedItems[item.id]);
-                  const holder = session ? (session.transferLogs.length > 0 ? session.transferLogs[session.transferLogs.length - 1].to : session.borrower) : '';
+                  const holder = session ? (session.transferLogs && session.transferLogs.length > 0 ? session.transferLogs[session.transferLogs.length - 1].to : session.borrower) : '';
+
                   return (
                     <div key={item.id} className={`p-5 rounded-3xl border-2 transition-all h-32 flex flex-col justify-between ${isBorrowed ? 'bg-rose-50 border-rose-200 shadow-sm' : 'bg-white border-slate-100 shadow-sm'}`}>
                       <div>
@@ -386,7 +365,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                       </div>
 
                       {/* 移轉履歷渲染 */}
-                      {s.transferLogs.length > 0 && (
+                      {s.transferLogs && s.transferLogs.length > 0 && (
                         <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
                           <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">移轉履歷 (Transfer Log)</span>
                           <div className="space-y-1">
@@ -453,7 +432,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                       <div className="space-y-3">
                         <div className="space-y-1">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">移轉路徑:</div>
-                          {h.transferLogs.length > 0 ? (
+                          {h.transferLogs && h.transferLogs.length > 0 ? (
                             <div className="space-y-1">
                               {h.transferLogs.map((l, i) => <div key={i} className="text-xs text-slate-600 font-medium italic">➔ {l.time}: {l.from} ➔ {l.to}</div>)}
                             </div>
@@ -504,8 +483,10 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
               </div>
             </div>
             <div className="p-8 bg-slate-50 border-t flex gap-4">
-              <button onClick={() => setWorkflow('none')} className="flex-1 py-4 border rounded-2xl font-black text-slate-500 hover:bg-white transition-all">返回修改</button>
-              <button onClick={handleConfirmBorrow} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg">確認借用</button>
+              <button disabled={isLoading} onClick={() => setWorkflow('none')} className="flex-1 py-4 border rounded-2xl font-black text-slate-500 hover:bg-white transition-all">返回修改</button>
+              <button disabled={isLoading} onClick={handleConfirmBorrow} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg">
+                {isLoading ? '處理中...' : '確認借用'}
+              </button>
             </div>
           </div>
         </div>
@@ -531,8 +512,10 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
               <input type="text" value={transferTarget} onChange={e => setTransferTarget(e.target.value)} className="w-full p-4 border rounded-2xl font-bold focus:ring-4 focus:ring-blue-500/10 outline-none" placeholder="請輸入姓名" />
             </div>
             <div className="p-6 bg-slate-50 border-t flex gap-3">
-              <button onClick={() => setWorkflow('none')} className="flex-1 py-3 border rounded-xl font-bold text-slate-500">取消</button>
-              <button onClick={handleTransfer} disabled={!transferTarget} className="flex-1 py-3 bg-slate-800 text-white rounded-xl font-bold disabled:opacity-50 transition-all">確認移轉</button>
+              <button disabled={isLoading} onClick={() => setWorkflow('none')} className="flex-1 py-3 border rounded-xl font-bold text-slate-500">取消</button>
+              <button disabled={!transferTarget || isLoading} onClick={handleTransfer} className="flex-1 py-3 bg-slate-800 text-white rounded-xl font-bold disabled:opacity-50 transition-all">
+                {isLoading ? '處理中...' : '確認移轉'}
+              </button>
             </div>
           </div>
         </div>
@@ -554,6 +537,8 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                   const item = RESOURCES.find(r => r.id === id);
                   const isTool = item?.category === '工具類';
                   const det = returnForm.itemDetails[id];
+                  const isUploading = uploadingItems[id];
+
                   return (
                     <div key={id} className={`p-4 rounded-2xl border-2 transition-all ${det ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100 hover:border-slate-300'}`}>
                       <div className="flex items-center justify-between">
@@ -576,12 +561,20 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                       {det && isTool && (
                         <div className="mt-4 flex items-center gap-2 overflow-x-auto p-1">
                           {det.photos.map((p, i) => <img key={i} src={p} className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-sm" alt="Upload" />)}
-                          {det.photos.length < 4 && (
-                            <label className="w-14 h-14 border-2 border-dashed rounded-xl flex items-center justify-center text-slate-400 cursor-pointer hover:border-blue-500 hover:text-blue-500 transition-all">
-                              <span className="text-xl">+</span>
-                              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handleReturnItemPhoto(id, e)} />
-                            </label>
+
+                          {isUploading ? (
+                            <div className="w-14 h-14 border-2 border-slate-200 rounded-xl flex items-center justify-center bg-slate-50 animate-pulse">
+                              <span className="text-[10px] text-slate-400">...</span>
+                            </div>
+                          ) : (
+                            det.photos.length < 4 && (
+                              <label className="w-14 h-14 border-2 border-dashed rounded-xl flex items-center justify-center text-slate-400 cursor-pointer hover:border-blue-500 hover:text-blue-500 transition-all">
+                                <span className="text-xl">+</span>
+                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handleReturnItemPhoto(id, e)} />
+                              </label>
+                            )
                           )}
+
                           {det.photos.length === 0 && <span className="text-[9px] text-rose-500 font-black tracking-widest animate-pulse uppercase ml-2 italic">⚠️ 工具類必填照片</span>}
                         </div>
                       )}
@@ -629,8 +622,10 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
               </div>
             </div>
             <div className="p-8 bg-slate-50 border-t flex gap-4">
-              <button onClick={() => setWorkflow('return_form')} className="flex-1 py-4 border rounded-2xl font-black text-slate-500">返回修改</button>
-              <button onClick={handleExecuteReturn} className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-black shadow-lg">確認完成歸還</button>
+              <button disabled={isLoading} onClick={() => setWorkflow('return_form')} className="flex-1 py-4 border rounded-2xl font-black text-slate-500">返回修改</button>
+              <button disabled={isLoading} onClick={handleExecuteReturn} className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-black shadow-lg">
+                {isLoading ? '提交中...' : '確認完成歸還'}
+              </button>
             </div>
           </div>
         </div>
