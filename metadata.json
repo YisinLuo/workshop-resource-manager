@@ -1,0 +1,7 @@
+{
+  "description": "Workshop Digital Resource Management System with Venue Booking and Resource Tracking.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "name": "Carmax App"
+}
