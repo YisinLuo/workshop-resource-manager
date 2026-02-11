@@ -92,7 +92,18 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
         const data = await fetchData('getAll');
         if (data && data.data) {
           if (data.data.resourceSessions) setSessions(data.data.resourceSessions);
-          if (data.data.resourceHistory) setHistory(data.data.resourceHistory);
+          if (data.data.resourceHistory) {
+            const parsedHistory = data.data.resourceHistory.map((h: any) => {
+              let items = {};
+              try {
+                items = h.status_json ? JSON.parse(h.status_json) : {};
+              } catch (e) {
+                console.error("Failed to parse history status_json", h);
+              }
+              return { ...h, items };
+            });
+            setHistory(parsedHistory);
+          }
         }
       } catch (e) { console.error(e); }
     };
