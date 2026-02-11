@@ -100,7 +100,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
               } catch (e) {
                 console.error("Failed to parse history status_json", h);
               }
-              return { ...h, items };
+              return { ...h, items, transferLogs: h.transferLogs || [] };
             });
             setHistory(parsedHistory);
           }
