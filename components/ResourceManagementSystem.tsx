@@ -351,16 +351,23 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
       {/* Tab 3: Return */}
       {subTab === 'return' && (
         <div className="space-y-4">
-          {sessions.length === 0 ? (
+          {(!sessions || sessions.length === 0) ? (
             <div className="py-20 text-center text-slate-400 font-bold border-2 border-dashed rounded-3xl">目前無任何借用中的資源單據</div>
           ) : (
-            sessions.map(s => {
+            sessions.map((s, idx) => {
+              // DEBUG: Check if session is valid
+              if (!s) {
+                console.warn(`Session at index ${idx} is undefined/null`);
+                return null;
+              }
+
               // Safety: Ensure s.items and s.returnedItems are defined before using
-              const items = s.items || [];
+              const items = Array.isArray(s.items) ? s.items : [];
               const returnedItems = s.returnedItems || {};
+              const transferLogs = Array.isArray(s.transferLogs) ? s.transferLogs : [];
 
               return (
-                <div key={s.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-6">
+                <div key={s.id || idx} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-6">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
@@ -370,22 +377,22 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                       </div>
 
                       {/* 移轉履歷渲染 */}
-                      {s.transferLogs && s.transferLogs.length > 0 && (
+                      {transferLogs.length > 0 && (
                         <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
                           <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">移轉履歷 (Transfer Log)</span>
                           <div className="space-y-1">
-                            {s.transferLogs.map((log, idx) => (
-                              <div key={idx} className="text-[10px] text-slate-600 italic">
+                            {transferLogs.map((log, logIdx) => log ? (
+                              <div key={logIdx} className="text-[10px] text-slate-600 italic">
                                 🕒 {log.time}：<span className="font-bold">{log.from}</span> 移轉給 <span className="font-bold text-blue-600">{log.to}</span>
                               </div>
-                            ))}
+                            ) : null)}
                           </div>
                         </div>
                       )}
 
                       <div className="flex flex-wrap gap-2">
-                        {items.map(id => (
-                          <span key={id} className={`text-[10px] font-bold px-2 py-1 rounded border ${returnedItems[id] ? 'bg-emerald-50 text-emerald-600 border-emerald-100 opacity-50' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{RESOURCES.find(r => r.id === id)?.name} {returnedItems[id] && '✓'}</span>
+                        {items.map((id, itemIdx) => (
+                          <span key={id || itemIdx} className={`text-[10px] font-bold px-2 py-1 rounded border ${returnedItems[id] ? 'bg-emerald-50 text-emerald-600 border-emerald-100 opacity-50' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{RESOURCES.find(r => r.id === id)?.name || 'Unknown'} {returnedItems[id] && '✓'}</span>
                         ))}
                       </div>
                     </div>

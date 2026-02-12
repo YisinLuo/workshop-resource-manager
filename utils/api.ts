@@ -42,6 +42,7 @@ async function post(action: PostAction, data: any = {}) {
 }
 
 export const api = {
+    post,
     isValid: () => !!API_URL,
 
     getAllData: () => post('GET_ALL_DATA'),
