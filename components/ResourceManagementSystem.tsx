@@ -238,6 +238,30 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
   // If api URL is not set, we might want to warn user? 
   // But App.tsx handles missing ENV mostly.
 
+  const getImageUrl = (url: string) => {
+    if (!url) return '';
+    try {
+      // If it's already a base64 data URI, return as is
+      if (url.startsWith('data:')) return url;
+
+      // Extract ID from various Google Drive URL formats
+      let id = '';
+      if (url.includes('id=')) {
+        id = url.split('id=')[1].split('&')[0];
+      } else if (url.includes('/file/d/')) {
+        id = url.split('/file/d/')[1].split('/')[0];
+      }
+
+      // Return the reliable thumbnail link if ID found
+      if (id) {
+        return `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
+      }
+    } catch (e) {
+      console.error('Error parsing image URL:', url);
+    }
+    return url;
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500 relative">
       {isLoading && (
@@ -249,7 +273,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
 
       {zoomImg && (
         <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4" onClick={() => setZoomImg(null)}>
-          <img src={zoomImg} className="max-w-full max-h-full rounded-lg" alt="Zoom" />
+          <img src={getImageUrl(zoomImg)} referrerPolicy="no-referrer" className="max-w-full max-h-full rounded-lg shadow-2xl" alt="Zoom" />
         </div>
       )}
 
@@ -465,7 +489,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                               <span className="text-[10px] font-black text-slate-800">{item?.name}</span>
                               <div className="flex gap-1">
                                 {det.photos.map((p, idx) => (
-                                  <img key={idx} src={p} onClick={() => setZoomImg(p)} className="w-10 h-10 rounded-lg object-cover cursor-zoom-in hover:opacity-80 transition-opacity border border-slate-200" alt="Inspect" />
+                                  <img key={idx} src={getImageUrl(p)} referrerPolicy="no-referrer" onClick={() => setZoomImg(p)} className="w-10 h-10 rounded-lg object-cover cursor-zoom-in hover:opacity-80 transition-opacity border border-slate-200" alt="Inspect" />
                                 ))}
                               </div>
                             </div>
@@ -574,7 +598,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                       </div>
                       {det && isTool && (
                         <div className="mt-4 flex items-center gap-2 overflow-x-auto p-1">
-                          {det.photos.map((p, i) => <img key={i} src={p} referrerPolicy="no-referrer" className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-sm" alt="Upload" />)}
+                          {det.photos.map((p, i) => <img key={i} src={getImageUrl(p)} referrerPolicy="no-referrer" className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-sm" alt="Upload" />)}
 
                           {isUploading ? (
                             <div className="w-14 h-14 border-2 border-slate-200 rounded-xl flex items-center justify-center bg-slate-50 animate-pulse">
