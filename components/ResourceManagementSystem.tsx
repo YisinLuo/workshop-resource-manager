@@ -120,7 +120,8 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
   };
 
   const borrowedItemIds = useMemo(() => {
-    return new Set(sessions.flatMap(s => s.items.filter(id => !s.returnedItems[id])));
+    // Safety check: ensure sessions is array, s.items exists, s.returnedItems exists
+    return new Set((sessions || []).flatMap(s => (s.items || []).filter(id => !(s.returnedItems || {})[id])));
   }, [sessions]);
 
   const getDateTime = () => {
@@ -288,7 +289,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {RESOURCES.filter(r => r.category === cat).map(item => {
                   const isBorrowed = borrowedItemIds.has(item.id);
-                  const session = sessions.find(s => s.items.includes(item.id) && !s.returnedItems[item.id]);
+                  const session = sessions.find(s => (s.items || []).includes(item.id) && !(s.returnedItems || {})[item.id]);
                   const holder = session ? (session.transferLogs && session.transferLogs.length > 0 ? session.transferLogs[session.transferLogs.length - 1].to : session.borrower) : '';
 
                   return (
@@ -354,6 +355,10 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
             <div className="py-20 text-center text-slate-400 font-bold border-2 border-dashed rounded-3xl">目前無任何借用中的資源單據</div>
           ) : (
             sessions.map(s => {
+              // Safety: Ensure s.items and s.returnedItems are defined before using
+              const items = s.items || [];
+              const returnedItems = s.returnedItems || {};
+
               return (
                 <div key={s.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-6">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -379,15 +384,15 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                       )}
 
                       <div className="flex flex-wrap gap-2">
-                        {s.items.map(id => (
-                          <span key={id} className={`text-[10px] font-bold px-2 py-1 rounded border ${s.returnedItems[id] ? 'bg-emerald-50 text-emerald-600 border-emerald-100 opacity-50' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{RESOURCES.find(r => r.id === id)?.name} {s.returnedItems[id] && '✓'}</span>
+                        {items.map(id => (
+                          <span key={id} className={`text-[10px] font-bold px-2 py-1 rounded border ${returnedItems[id] ? 'bg-emerald-50 text-emerald-600 border-emerald-100 opacity-50' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{RESOURCES.find(r => r.id === id)?.name} {returnedItems[id] && '✓'}</span>
                         ))}
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-center px-4 border-r">
                         <span className="text-[10px] font-black text-slate-400 block">歸還進度</span>
-                        <span className="text-lg font-black text-blue-600">{Object.keys(s.returnedItems).length} / {s.items.length}</span>
+                        <span className="text-lg font-black text-blue-600">{Object.keys(returnedItems).length} / {items.length}</span>
                       </div>
                       <button onClick={() => { setActiveSessionId(s.id); setWorkflow('transfer_form'); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-black transition-all">🤝 物件移轉</button>
                       <button onClick={() => {
@@ -415,7 +420,8 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
               <div className="py-20 text-center text-slate-400 font-bold border-2 border-dashed rounded-3xl">尚無點檢紀錄</div>
             ) : (
               history.map(h => {
-                const hasMissing = (Object.values(h.items) as { isIntact: boolean; photos: string[] }[]).some(d => !d.isIntact);
+                const itemsSafe = h.items || {};
+                const hasMissing = (Object.values(itemsSafe) as { isIntact: boolean; photos: string[] }[]).some(d => !d.isIntact);
                 return (
                   <div key={h.id} className={`p-6 rounded-3xl border shadow-sm transition-all ${hasMissing ? 'bg-rose-50 border-rose-300' : 'bg-white border-slate-200'}`}>
                     <div className="flex flex-col md:flex-row justify-between items-start mb-4 gap-2">
@@ -444,7 +450,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {(Object.entries(h.items) as [string, { isIntact: boolean; photos: string[] }][]).map(([id, det]) => {
+                        {(Object.entries(itemsSafe) as [string, { isIntact: boolean; photos: string[] }][]).map(([id, det]) => {
                           const item = RESOURCES.find(r => r.id === id);
                           return (
                             <div key={id} className={`p-3 rounded-2xl border flex flex-col gap-2 min-w-[140px] ${det.isIntact ? 'bg-white border-slate-100' : 'bg-rose-100 border-rose-400'}`}>
@@ -533,7 +539,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
 
               <div className="space-y-4">
                 <h4 className="font-black text-slate-700 border-l-4 border-blue-600 pl-3 uppercase tracking-tighter">選擇要歸還的項目</h4>
-                {sessions.find(s => s.id === activeSessionId)?.items.filter(id => !sessions.find(s => s.id === activeSessionId)?.returnedItems[id]).map(id => {
+                {(sessions.find(s => s.id === activeSessionId)?.items || []).filter(id => !(sessions.find(s => s.id === activeSessionId)?.returnedItems || {})[id]).map(id => {
                   const item = RESOURCES.find(r => r.id === id);
                   const isTool = item?.category === '工具類';
                   const det = returnForm.itemDetails[id];
