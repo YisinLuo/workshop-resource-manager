@@ -13,6 +13,9 @@ async function post(action: PostAction, data: any = {}) {
         throw new Error('API URL not set');
     }
 
+    // DEBUG: Verify which URL is being used
+    console.log('Using API URL:', API_URL.substring(0, 30) + '...');
+
     // Use fetch with 'no-cors' mode is NOT what we want for reading response.
     // We use standard CORS request.
     // GAS Web App must be deployed to "Anyone" execution "Me".
