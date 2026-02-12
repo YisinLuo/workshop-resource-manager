@@ -201,7 +201,7 @@ const CancelConfirmationModal: React.FC<{
                           key={date}
                           onClick={() => !started && handleToggleDate(date)}
                           className={`p-3 rounded-xl border-2 flex items-center justify-between transition-all cursor-pointer ${started ? 'bg-slate-100 border-slate-200 opacity-50 cursor-not-allowed' :
-                              isSelected ? 'bg-rose-50 border-rose-500' : 'bg-white border-slate-100 hover:border-slate-300'
+                            isSelected ? 'bg-rose-50 border-rose-500' : 'bg-white border-slate-100 hover:border-slate-300'
                             }`}
                         >
                           <div className="flex flex-col">
@@ -603,7 +603,17 @@ const AppContent: React.FC = () => {
     try {
       const data = await api.getAllData();
       if (data && data.venues) {
-        setBookings(data.venues);
+        // Fix: Normalize dates to local YYYY-MM-DD to handle UTC timestamps from GAS
+        const normalizedBookings = data.venues.map((b: any) => {
+          const startDate = new Date(b.startDate);
+          const endDate = new Date(b.endDate);
+          return {
+            ...b,
+            startDate: `${startDate.getFullYear()}-${(startDate.getMonth() + 1).toString().padStart(2, '0')}-${startDate.getDate().toString().padStart(2, '0')}`,
+            endDate: `${endDate.getFullYear()}-${(endDate.getMonth() + 1).toString().padStart(2, '0')}-${endDate.getDate().toString().padStart(2, '0')}`
+          };
+        });
+        setBookings(normalizedBookings);
         // Note: sessions and history are also available in `data`, 
         // but ResourceManagementSystem will load its own data or we can pass it down.
         // For simplicity in refactoring, we let ResourceManagementSystem call fetch on mount as well.
