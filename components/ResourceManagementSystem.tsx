@@ -574,7 +574,7 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
                       </div>
                       {det && isTool && (
                         <div className="mt-4 flex items-center gap-2 overflow-x-auto p-1">
-                          {det.photos.map((p, i) => <img key={i} src={p} className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-sm" alt="Upload" />)}
+                          {det.photos.map((p, i) => <img key={i} src={p} referrerPolicy="no-referrer" className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-sm" alt="Upload" />)}
 
                           {isUploading ? (
                             <div className="w-14 h-14 border-2 border-slate-200 rounded-xl flex items-center justify-center bg-slate-50 animate-pulse">
