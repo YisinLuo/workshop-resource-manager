@@ -76,7 +76,7 @@ interface HistoryEntry {
   returnTime: string;
   notes: string;
   transferLogs: TransferLog[];
-  items: Record<string, { isIntact: boolean; photos: string[] }>;
+  itemDetails: Record<string, { isIntact: boolean; photos: string[] }>;
 }
 
 // --- Component ---
@@ -426,11 +426,12 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
             {history.length === 0 ? (
               <div className="py-20 text-center text-slate-400 font-bold border-2 border-dashed rounded-3xl">尚無點檢紀錄</div>
             ) : (
-              history.map(h => {
-                const itemsSafe = h.items || {};
+              history.map((h, hIdx) => {
+                if (!h) return null;
+                const itemsSafe = h.itemDetails || {};
                 const hasMissing = (Object.values(itemsSafe) as { isIntact: boolean; photos: string[] }[]).some(d => !d.isIntact);
                 return (
-                  <div key={h.id} className={`p-6 rounded-3xl border shadow-sm transition-all ${hasMissing ? 'bg-rose-50 border-rose-300' : 'bg-white border-slate-200'}`}>
+                  <div key={h.id || hIdx} className={`p-6 rounded-3xl border shadow-sm transition-all ${hasMissing ? 'bg-rose-50 border-rose-300' : 'bg-white border-slate-200'}`}>
                     <div className="flex flex-col md:flex-row justify-between items-start mb-4 gap-2">
                       <div className="flex items-center gap-3">
                         <span className={`text-[10px] font-black px-3 py-1 rounded-full text-white ${hasMissing ? 'bg-rose-600 shadow-lg shadow-rose-200' : 'bg-emerald-600'}`}>{hasMissing ? '工具遺失' : '✅ 完好歸還'}</span>
