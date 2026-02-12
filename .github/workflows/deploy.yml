@@ -30,7 +30,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_GAS_API_URL: ${{ secrets.VITE_GAS_API_URL }}
+          VITE_GAS_API_URL: 'https://script.google.com/macros/s/AKfycbzVQ1I9WnwcF4VcjIuaDadLvR4dhAAXZKqpj5LZ7_x4-Cyd5LLu1tnnMD5P1SRZvloA/exec'
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
