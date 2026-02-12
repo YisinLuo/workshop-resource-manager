@@ -130,23 +130,37 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
   };
 
   const handleConfirmBorrow = async () => {
-    const newSession = {
+    // Optimistic UI
+    const newSession: BorrowSession = {
+      id: Math.random().toString(36).substr(2, 9), // Client-side ID
       items: [...selectedItemIds],
       borrower: userInfo.name,
       dept: userInfo.dept,
       borrowTime: getDateTime(),
+      transferLogs: [],
+      returnedItems: {}
     };
 
-    setIsLoading(true);
+    const previousSessions = [...sessions];
+    const previousSelected = [...selectedItemIds];
+
+    // 1. Update UI
+    setSessions(prev => [...prev, newSession]);
+    setSelectedItemIds([]);
+    setWorkflow('borrow_success');
+
+    // 2. Call API
     try {
       await api.borrowItems(newSession);
-      await loadData(); // Reload to get the new session with ID from server
-      setSelectedItemIds([]);
-      setWorkflow('borrow_success');
+      // 3. Sync
+      loadData();
     } catch (e) {
-      alert('借用失敗: ' + e);
-    } finally {
-      setIsLoading(false);
+      // 4. Revert
+      console.error('Borrow failed, reverting', e);
+      setSessions(previousSessions);
+      setSelectedItemIds(previousSelected);
+      setWorkflow('none');
+      alert('借用失敗: ' + (e instanceof Error ? e.message : e));
     }
   };
 
@@ -154,22 +168,45 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
     if (!activeSessionId || !transferTarget) return;
 
     // Find previous holder
-    const session = sessions.find(s => s.id === activeSessionId);
-    let from = session?.borrower || 'Unknown';
-    if (session && session.transferLogs && session.transferLogs.length > 0) {
+    const sessionIndex = sessions.findIndex(s => s.id === activeSessionId);
+    if (sessionIndex === -1) return;
+
+    const session = sessions[sessionIndex];
+    let from = session.borrower || 'Unknown';
+    if (session.transferLogs && session.transferLogs.length > 0) {
       from = session.transferLogs[session.transferLogs.length - 1].to;
     }
 
-    setIsLoading(true);
+    const newLog = {
+      from: from,
+      to: transferTarget,
+      time: getDateTime()
+    };
+
+    const previousSessions = JSON.parse(JSON.stringify(sessions)); // Deep clone for safety
+
+    // 1. Update UI
+    setSessions(prev => {
+      const newSessions = [...prev];
+      const targetSession = { ...newSessions[sessionIndex] };
+      targetSession.transferLogs = [...(targetSession.transferLogs || []), newLog];
+      newSessions[sessionIndex] = targetSession;
+      return newSessions;
+    });
+
+    setWorkflow('none');
+    setTransferTarget('');
+
+    // 2. Call API
     try {
-      await api.transferItems(activeSessionId, from, transferTarget, getDateTime());
-      await loadData();
-      setWorkflow('none');
-      setTransferTarget('');
+      await api.transferItems(activeSessionId, from, transferTarget, newLog.time);
+      loadData();
     } catch (e) {
-      alert('移轉失敗: ' + e);
-    } finally {
-      setIsLoading(false);
+      // 3. Revert
+      console.error('Transfer failed, reverting', e);
+      setSessions(previousSessions);
+      setWorkflow('transfer_form'); // Re-open form?
+      alert('移轉失敗: ' + (e instanceof Error ? e.message : e));
     }
   };
 
@@ -183,10 +220,6 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
       // Compress first
       const compressed = await compressImage(file);
       // Upload
-      // We manually call post here because api.uploadImage expects File not base64, 
-      // but we have base64 from compressImage.
-      // Actually we can refactor api to accept base64 or just call post directly.
-      // Calling post directly is easier here.
       const result = await api.post('UPLOAD_IMAGE', {
         fileName: compressed.name,
         mimeType: 'image/jpeg',
@@ -214,24 +247,65 @@ export const ResourceManagementSystem: React.FC<{ userInfo: { name: string; dept
     const session = sessions.find(s => s.id === activeSessionId);
     if (!session) return;
 
-    setIsLoading(true);
+    const returnTime = getDateTime();
+    const previousSessions = JSON.parse(JSON.stringify(sessions));
+    const previousHistory = [...history];
+
+    // 1. Update UI
+    // Update Session (mark items as returned)
+    setSessions(prev => {
+      return prev.map(s => {
+        if (s.id === activeSessionId) {
+          const newReturned = { ...s.returnedItems };
+          Object.keys(returnForm.itemDetails).forEach(itemId => {
+            newReturned[itemId] = {
+              ...returnForm.itemDetails[itemId],
+              returner: returnForm.returner,
+              time: returnTime
+            };
+          });
+          return { ...s, returnedItems: newReturned };
+        }
+        return s;
+      });
+    });
+
+    // Add to History
+    const newHistoryEntry: HistoryEntry = {
+      id: Math.random().toString(36).substr(2, 9),
+      sessionId: session.id,
+      borrower: session.borrower,
+      borrowTime: session.borrowTime,
+      returner: returnForm.returner,
+      returnTime: returnTime,
+      notes: returnForm.notes,
+      transferLogs: session.transferLogs,
+      itemDetails: returnForm.itemDetails
+    };
+    setHistory(prev => [newHistoryEntry, ...prev]);
+
+    setWorkflow('return_success');
+
+    // 2. Call API
     try {
       await api.returnItems({
         sessionId: session.id,
         borrower: session.borrower,
         borrowTime: session.borrowTime,
         returner: returnForm.returner,
-        returnTime: getDateTime(),
+        returnTime: returnTime,
         notes: returnForm.notes,
         items: returnForm.itemDetails,
-        transferLogs: session.transferLogs // Pass fetch logs so history has record of transfers
+        transferLogs: session.transferLogs
       });
-      await loadData();
-      setWorkflow('return_success');
+      loadData();
     } catch (e) {
-      alert('歸還失敗: ' + e);
-    } finally {
-      setIsLoading(false);
+      // 3. Revert
+      console.error('Return failed, reverting', e);
+      setSessions(previousSessions);
+      setHistory(previousHistory);
+      setWorkflow('return_preview'); // Re-open preview
+      alert('歸還失敗: ' + (e instanceof Error ? e.message : e));
     }
   };
 

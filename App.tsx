@@ -656,28 +656,71 @@ const AppContent: React.FC = () => {
   };
 
   const addBooking = async (b: Omit<Booking, 'id' | 'excludedDates'>) => {
-    // Generate ID on client or server? Server is safer but client is faster for optimisic UI. 
-    // GAS script expects ID.
+    // Optimistic UI: Generate ID and update state immediately
     const newId = Math.random().toString(36).substr(2, 9);
-    const booking = { ...b, id: newId };
+    const booking: Booking = { ...b, id: newId, excludedDates: [] };
 
+    // Snapshot for rollback
+    const previousBookings = [...bookings];
+
+    // 1. Update UI immediately
+    setBookings(prev => [...prev, booking]);
+
+    // 2. Perform API call in background
     try {
       await api.bookVenue(booking);
-      await loadData();
+      // 3. Sync with server to ensure consistency (e.g. timestamp)
+      loadData();
     } catch (e) {
-      alert('預約失敗: ' + e);
+      // 4. Revert on failure
+      console.error('Booking failed, reverting optimistic update', e);
+      setBookings(previousBookings);
+      alert('預約失敗: ' + (e instanceof Error ? e.message : e));
     }
   };
 
   const confirmAndCancelBooking = async (id: string, pass: string, datesToRemove: string[]): Promise<boolean> => {
-    try {
-      await api.cancelBooking(id, pass, datesToRemove);
-      await loadData();
-      return true;
-    } catch (e) {
-      console.error(e);
-      return false;
+    // Verify password locally first for immediate feedback
+    const booking = bookings.find(b => b.id === id);
+    if (!booking) return false;
+    if (booking.password !== pass) {
+      alert('密碼錯誤，請重新確認！'); // Early alert
+      return false; // Prevent modal close
     }
+
+    // Snapshot for rollback
+    const previousBookings = [...bookings];
+
+    // 1. Update UI immediately
+    setBookings(prev => {
+      return prev.map(b => {
+        if (b.id === id) {
+          if (datesToRemove.length > 0) {
+            // Partial cancel
+            const newExcluded = [...(b.excludedDates || []), ...datesToRemove];
+            // Remove duplicates just in case
+            return { ...b, excludedDates: [...new Set(newExcluded)] };
+          } else {
+            // Full cancel (remove from view)
+            return null;
+          }
+        }
+        return b;
+      }).filter(Boolean) as Booking[];
+    });
+
+    // 2. Perform API call in background
+    // We return true immediately to allow Modal to close
+    api.cancelBooking(id, pass, datesToRemove)
+      .then(() => loadData()) // Sync after success
+      .catch(e => {
+        // Revert on failure
+        console.error('Cancellation failed, reverting', e);
+        setBookings(previousBookings);
+        alert('取消失敗: ' + (e instanceof Error ? e.message : e));
+      });
+
+    return true;
   };
 
   if (!isLoggedIn) {
