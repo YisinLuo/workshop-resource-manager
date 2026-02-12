@@ -604,13 +604,29 @@ const AppContent: React.FC = () => {
       const data = await api.getAllData();
       if (data && data.venues) {
         // Fix: Normalize dates to local YYYY-MM-DD to handle UTC timestamps from GAS
+        // Fix (Time): Also normalize startTime/endTime if they are ISO strings (1899-12-30...)
         const normalizedBookings = data.venues.map((b: any) => {
           const startDate = new Date(b.startDate);
           const endDate = new Date(b.endDate);
+
+          let st = b.startTime;
+          let et = b.endTime;
+
+          const formatTime = (t: any) => {
+            // If t is string and contains T (ISO), parse it
+            if (typeof t === 'string' && t.includes('T')) {
+              const d = new Date(t);
+              return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+            }
+            return t;
+          };
+
           return {
             ...b,
             startDate: `${startDate.getFullYear()}-${(startDate.getMonth() + 1).toString().padStart(2, '0')}-${startDate.getDate().toString().padStart(2, '0')}`,
-            endDate: `${endDate.getFullYear()}-${(endDate.getMonth() + 1).toString().padStart(2, '0')}-${endDate.getDate().toString().padStart(2, '0')}`
+            endDate: `${endDate.getFullYear()}-${(endDate.getMonth() + 1).toString().padStart(2, '0')}-${endDate.getDate().toString().padStart(2, '0')}`,
+            startTime: formatTime(st),
+            endTime: formatTime(et)
           };
         });
         setBookings(normalizedBookings);
